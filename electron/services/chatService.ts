@@ -5209,39 +5209,36 @@ class ChatService {
         return { success: true, detail: cachedDetail.detail }
       }
 
-      const [tableStatsResult, statsResult] = await Promise.allSettled([
-        wcdbService.getMessageTableStats(normalizedSessionId),
-        (async (): Promise<ExportSessionStats | null> => {
-          const cachedStats = this.getSessionStatsCacheEntry(normalizedSessionId)
-          if (cachedStats && this.supportsRequestedRelation(cachedStats.entry, false)) {
-            return this.fromSessionStatsCacheStats(cachedStats.entry.stats)
-          }
-          const myWxid = this.configService.get('myWxid') || ''
-          const selfIdentitySet = new Set<string>(this.buildIdentityKeys(myWxid))
-          const stats = await this.getOrComputeSessionExportStats(normalizedSessionId, false, selfIdentitySet)
-          this.setSessionStatsCacheEntry(normalizedSessionId, stats, false)
-          return stats
-        })()
-      ])
-
-      const statsSnapshot = statsResult.status === 'fulfilled'
-        ? statsResult.value
-        : null
-      const firstMessageTime = statsSnapshot && Number.isFinite(statsSnapshot.firstTimestamp)
-        ? Math.max(0, Math.floor(statsSnapshot.firstTimestamp as number))
-        : undefined
-      const latestMessageTime = statsSnapshot && Number.isFinite(statsSnapshot.lastTimestamp)
-        ? Math.max(0, Math.floor(statsSnapshot.lastTimestamp as number))
-        : undefined
+      const tableStatsResult = await wcdbService.getMessageTableStats(normalizedSessionId)
 
       const messageTables: { dbName: string; tableName: string; count: number }[] = []
-      if (tableStatsResult.status === 'fulfilled' && tableStatsResult.value.success && tableStatsResult.value.tables) {
-        for (const row of tableStatsResult.value.tables) {
+      let firstMessageTime: number | undefined
+      let latestMessageTime: number | undefined
+      if (tableStatsResult.success && tableStatsResult.tables) {
+        for (const row of tableStatsResult.tables) {
           messageTables.push({
             dbName: basename(row.db_path || ''),
             tableName: row.table_name || '',
             count: parseInt(row.count || '0', 10)
           })
+
+          const firstTs = this.getRowInt(
+            row,
+            ['first_timestamp', 'firstTimestamp', 'first_time', 'firstTime', 'min_create_time', 'minCreateTime'],
+            0
+          )
+          if (firstTs > 0 && (firstMessageTime === undefined || firstTs < firstMessageTime)) {
+            firstMessageTime = firstTs
+          }
+
+          const lastTs = this.getRowInt(
+            row,
+            ['last_timestamp', 'lastTimestamp', 'last_time', 'lastTime', 'max_create_time', 'maxCreateTime'],
+            0
+          )
+          if (lastTs > 0 && (latestMessageTime === undefined || lastTs > latestMessageTime)) {
+            latestMessageTime = lastTs
+          }
         }
       }
 
