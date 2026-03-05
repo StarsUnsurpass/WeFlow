@@ -2158,16 +2158,7 @@ function ExportPage() {
     setSessionSnsTimelineStatsLoading(false)
   }, [])
 
-  const openSessionSnsTimeline = useCallback(() => {
-    const normalizedSessionId = String(sessionDetail?.wxid || '').trim()
-    if (!isSingleContactSession(normalizedSessionId) || !sessionDetail) return
-
-    const target: SessionSnsTimelineTarget = {
-      username: normalizedSessionId,
-      displayName: sessionDetail.displayName || sessionDetail.remark || sessionDetail.nickName || normalizedSessionId,
-      avatarUrl: sessionDetail.avatarUrl
-    }
-
+  const openSessionSnsTimelineByTarget = useCallback((target: SessionSnsTimelineTarget) => {
     setSessionSnsTimelineTarget(target)
     setSessionSnsTimelinePosts([])
     setSessionSnsTimelineHasMore(false)
@@ -2175,7 +2166,7 @@ function ExportPage() {
     setSessionSnsTimelineLoading(false)
 
     if (snsUserPostCountsStatus === 'ready') {
-      const count = Number(snsUserPostCounts[normalizedSessionId] || 0)
+      const count = Number(snsUserPostCounts[target.username] || 0)
       setSessionSnsTimelineTotalPosts(Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0)
       setSessionSnsTimelineStatsLoading(false)
     } else {
@@ -2188,10 +2179,32 @@ function ExportPage() {
   }, [
     loadSessionSnsTimelinePosts,
     loadSnsUserPostCounts,
-    sessionDetail,
     snsUserPostCounts,
     snsUserPostCountsStatus
   ])
+
+  const openSessionSnsTimeline = useCallback(() => {
+    const normalizedSessionId = String(sessionDetail?.wxid || '').trim()
+    if (!isSingleContactSession(normalizedSessionId) || !sessionDetail) return
+
+    const target: SessionSnsTimelineTarget = {
+      username: normalizedSessionId,
+      displayName: sessionDetail.displayName || sessionDetail.remark || sessionDetail.nickName || normalizedSessionId,
+      avatarUrl: sessionDetail.avatarUrl
+    }
+
+    openSessionSnsTimelineByTarget(target)
+  }, [openSessionSnsTimelineByTarget, sessionDetail])
+
+  const openContactSnsTimeline = useCallback((contact: ContactInfo) => {
+    const normalizedSessionId = String(contact?.username || '').trim()
+    if (!isSingleContactSession(normalizedSessionId)) return
+    openSessionSnsTimelineByTarget({
+      username: normalizedSessionId,
+      displayName: contact.displayName || contact.remark || contact.nickname || normalizedSessionId,
+      avatarUrl: contact.avatarUrl
+    })
+  }, [openSessionSnsTimelineByTarget])
 
   const loadMoreSessionSnsTimeline = useCallback(() => {
     if (!sessionSnsTimelineTarget || sessionSnsTimelineLoading || sessionSnsTimelineLoadingMore || !sessionSnsTimelineHasMore) return
@@ -4058,6 +4071,9 @@ function ExportPage() {
     if (activeTab === 'former_friend') return '曾经的好友'
     return '公众号'
   }, [activeTab])
+  const shouldShowSnsColumn = useMemo(() => (
+    activeTab === 'private' || activeTab === 'former_friend'
+  ), [activeTab])
 
   const sessionRowByUsername = useMemo(() => {
     const map = new Map<string, SessionRow>()
@@ -5004,6 +5020,10 @@ function ExportPage() {
     const voiceMetric = metricToDisplay(mediaMetric?.voiceMessages)
     const imageMetric = metricToDisplay(mediaMetric?.imageMessages)
     const videoMetric = metricToDisplay(mediaMetric?.videoMessages)
+    const isSnsCountLoading = snsUserPostCountsStatus === 'loading' || snsUserPostCountsStatus === 'idle'
+    const snsRawCount = Number(snsUserPostCounts[contact.username] || 0)
+    const snsCount = Number.isFinite(snsRawCount) ? Math.max(0, Math.floor(snsRawCount)) : 0
+    const supportsSnsTimeline = isSingleContactSession(contact.username)
     const openChatLabel = contact.type === 'friend'
       ? '打开私聊'
       : contact.type === 'group'
@@ -5086,6 +5106,24 @@ function ExportPage() {
                 : videoMetric.text}
             </strong>
           </div>
+          {shouldShowSnsColumn && (
+            <div className="row-media-metric">
+              {supportsSnsTimeline ? (
+                <button
+                  type="button"
+                  className={`row-sns-metric-btn ${isSnsCountLoading ? 'loading' : ''}`}
+                  title={`查看 ${contact.displayName || contact.username} 的朋友圈`}
+                  onClick={() => openContactSnsTimeline(contact)}
+                >
+                  {isSnsCountLoading
+                    ? <Loader2 size={12} className="spin row-media-metric-icon" aria-label="朋友圈统计加载中" />
+                    : `${snsCount.toLocaleString('zh-CN')} 条`}
+                </button>
+              ) : (
+                <strong className="row-media-metric-value">--</strong>
+              )}
+            </div>
+          )}
           <div className="row-action-cell">
             <div className="row-action-main">
               <button
@@ -5121,6 +5159,7 @@ function ExportPage() {
   }, [
     lastExportBySession,
     nowTick,
+    openContactSnsTimeline,
     openSessionDetail,
     openSingleExport,
     queuedSessionIds,
@@ -5131,6 +5170,9 @@ function ExportPage() {
     sessionMessageCounts,
     sessionRowByUsername,
     showSessionDetailPanel,
+    shouldShowSnsColumn,
+    snsUserPostCounts,
+    snsUserPostCountsStatus,
     toggleSelectSession
   ])
   const handleContactsListWheelCapture = useCallback((event: WheelEvent<HTMLDivElement>) => {
@@ -5395,6 +5437,9 @@ function ExportPage() {
                   <span className="contacts-list-header-media">语音</span>
                   <span className="contacts-list-header-media">图片</span>
                   <span className="contacts-list-header-media">视频</span>
+                  {shouldShowSnsColumn && (
+                    <span className="contacts-list-header-media">朋友圈</span>
+                  )}
                   <span className="contacts-list-header-actions">
                     {selectedCount > 0 && (
                       <>
