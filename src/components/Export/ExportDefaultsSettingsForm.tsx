@@ -245,7 +245,7 @@ export function ExportDefaultsSettingsForm({
         }}
       />
 
-      <div className="form-group">
+      <div className="form-group media-setting-group">
         <div className="form-copy">
           <label>默认导出媒体内容</label>
           <span className="form-hint">控制图片、视频、语音、表情包的默认导出开关</span>
