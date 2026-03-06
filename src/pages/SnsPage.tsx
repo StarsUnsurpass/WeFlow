@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useState, useRef, useCallback, useMemo } from 'react'
-import { RefreshCw, Search, X, Download, FolderOpen, FileJson, FileText, Image, CheckCircle, AlertCircle, Calendar, Info, ChevronLeft, ChevronRight, Shield, ShieldOff, Loader2 } from 'lucide-react'
+import { RefreshCw, Search, X, Download, FolderOpen, FileJson, FileText, Image, CheckCircle, AlertCircle, Calendar, Info, Shield, ShieldOff, Loader2 } from 'lucide-react'
 import './SnsPage.scss'
 import { SnsPost } from '../types/sns'
 import { SnsPostItem } from '../components/Sns/SnsPostItem'
@@ -7,7 +7,13 @@ import { SnsFilterPanel } from '../components/Sns/SnsFilterPanel'
 import { ContactSnsTimelineDialog } from '../components/Sns/ContactSnsTimelineDialog'
 import type { ContactSnsTimelineTarget } from '../components/Sns/contactSnsTimeline'
 import JumpToDatePopover from '../components/JumpToDatePopover'
+import { ExportDateRangeDialog } from '../components/Export/ExportDateRangeDialog'
 import * as configService from '../services/config'
+import {
+    createExportDateRangeSelectionFromPreset,
+    getExportDateRangeLabel,
+    type ExportDateRangeSelection
+} from '../utils/exportDateRange'
 
 const SNS_PAGE_CACHE_TTL_MS = 24 * 60 * 60 * 1000
 const SNS_PAGE_CACHE_POST_LIMIT = 200
@@ -133,13 +139,14 @@ export default function SnsPage() {
     const [exportImages, setExportImages] = useState(false)
     const [exportLivePhotos, setExportLivePhotos] = useState(false)
     const [exportVideos, setExportVideos] = useState(false)
-    const [exportDateRange, setExportDateRange] = useState<{ start: string; end: string }>({ start: '', end: '' })
+    const [exportDateRangeSelection, setExportDateRangeSelection] = useState<ExportDateRangeSelection>(
+        () => createExportDateRangeSelectionFromPreset('all')
+    )
     const [isExporting, setIsExporting] = useState(false)
     const [exportProgress, setExportProgress] = useState<{ current: number; total: number; status: string } | null>(null)
     const [exportResult, setExportResult] = useState<{ success: boolean; filePath?: string; postCount?: number; mediaCount?: number; error?: string } | null>(null)
     const [refreshSpin, setRefreshSpin] = useState(false)
-    const [calendarPicker, setCalendarPicker] = useState<{ field: 'start' | 'end'; month: Date } | null>(null)
-    const [showYearMonthPicker, setShowYearMonthPicker] = useState(false)
+    const [isExportDateRangeDialogOpen, setIsExportDateRangeDialogOpen] = useState(false)
 
     // 触发器相关状态
     const [showTriggerDialog, setShowTriggerDialog] = useState(false)
@@ -545,6 +552,8 @@ export default function SnsPage() {
         }
         return `${formatDateOnly(overviewStats.earliestTime)} ~ ${formatDateOnly(overviewStats.latestTime)}`
     }
+
+    const exportDateRangeLabel = useMemo(() => getExportDateRangeLabel(exportDateRangeSelection), [exportDateRangeSelection])
 
     const loadPosts = useCallback(async (options: { reset?: boolean, direction?: 'older' | 'newer' } = {}) => {
         const { reset = false, direction = 'older' } = options
@@ -1180,7 +1189,8 @@ export default function SnsPage() {
                                 onClick={() => {
                                     setExportResult(null)
                                     setExportProgress(null)
-                                    setExportDateRange({ start: '', end: '' })
+                                    setExportDateRangeSelection(createExportDateRangeSelectionFromPreset('all'))
+                                    setIsExportDateRangeDialogOpen(false)
                                     setShowExportDialog(true)
                                 }}
                                 className="icon-btn export-btn"
@@ -1505,31 +1515,19 @@ export default function SnsPage() {
 
                                     {/* 时间范围 */}
                                     <div className="export-section">
-                                        <label className="export-label"><Calendar size={14} /> 时间范围（可选）</label>
-                                        <div className="export-date-row">
-                                            <div className="date-picker-trigger" onClick={() => {
-                                                if (!isExporting) setCalendarPicker(prev => prev?.field === 'start' ? null : { field: 'start', month: exportDateRange.start ? new Date(exportDateRange.start) : new Date() })
-                                            }}>
-                                                <Calendar size={14} />
-                                                <span className={exportDateRange.start ? '' : 'placeholder'}>
-                                                    {exportDateRange.start || '开始日期'}
-                                                </span>
-                                                {exportDateRange.start && (
-                                                    <X size={12} className="clear-date" onClick={(e) => { e.stopPropagation(); setExportDateRange(prev => ({ ...prev, start: '' })) }} />
-                                                )}
-                                            </div>
-                                            <span className="date-separator">至</span>
-                                            <div className="date-picker-trigger" onClick={() => {
-                                                if (!isExporting) setCalendarPicker(prev => prev?.field === 'end' ? null : { field: 'end', month: exportDateRange.end ? new Date(exportDateRange.end) : new Date() })
-                                            }}>
-                                                <Calendar size={14} />
-                                                <span className={exportDateRange.end ? '' : 'placeholder'}>
-                                                    {exportDateRange.end || '结束日期'}
-                                                </span>
-                                                {exportDateRange.end && (
-                                                    <X size={12} className="clear-date" onClick={(e) => { e.stopPropagation(); setExportDateRange(prev => ({ ...prev, end: '' })) }} />
-                                                )}
-                                            </div>
+                                        <div className="export-section-header">
+                                            <label className="export-label"><Calendar size={14} /> 时间范围</label>
+                                            <button
+                                                type="button"
+                                                className="time-range-trigger sns-export-time-range-trigger"
+                                                onClick={() => {
+                                                    if (!isExporting) setIsExportDateRangeDialogOpen(true)
+                                                }}
+                                                disabled={isExporting}
+                                            >
+                                                <span>{exportDateRangeLabel}</span>
+                                                <span className="time-range-arrow">&gt;</span>
+                                            </button>
                                         </div>
                                     </div>
 
@@ -1620,8 +1618,12 @@ export default function SnsPage() {
                                                         exportImages,
                                                         exportLivePhotos,
                                                         exportVideos,
-                                                        startTime: exportDateRange.start ? Math.floor(new Date(exportDateRange.start).getTime() / 1000) : undefined,
-                                                        endTime: exportDateRange.end ? Math.floor(new Date(exportDateRange.end + 'T23:59:59').getTime() / 1000) : undefined
+                                                        startTime: exportDateRangeSelection.useAllTime
+                                                            ? undefined
+                                                            : Math.floor(exportDateRangeSelection.dateRange.start.getTime() / 1000),
+                                                        endTime: exportDateRangeSelection.useAllTime
+                                                            ? undefined
+                                                            : Math.floor(exportDateRangeSelection.dateRange.end.getTime() / 1000)
                                                     })
                                                     setExportResult(result)
                                                 } catch (e: any) {
@@ -1688,119 +1690,15 @@ export default function SnsPage() {
                 </div>
             )}
 
-            {/* 日期选择弹窗 */}
-            {calendarPicker && (
-                <div className="calendar-overlay" onClick={() => { setCalendarPicker(null); setShowYearMonthPicker(false) }}>
-                    <div className="calendar-modal" onClick={e => e.stopPropagation()}>
-                        <div className="calendar-header">
-                            <div className="title-area">
-                                <Calendar size={18} />
-                                <h3>选择{calendarPicker.field === 'start' ? '开始' : '结束'}日期</h3>
-                            </div>
-                            <button className="close-btn" onClick={() => { setCalendarPicker(null); setShowYearMonthPicker(false) }}>
-                                <X size={18} />
-                            </button>
-                        </div>
-                        <div className="calendar-view">
-                            <div className="calendar-nav">
-                                <button className="nav-btn" onClick={() => setCalendarPicker(prev => prev ? { ...prev, month: new Date(prev.month.getFullYear(), prev.month.getMonth() - 1, 1) } : null)}>
-                                    <ChevronLeft size={18} />
-                                </button>
-                                <span className="current-month clickable" onClick={() => setShowYearMonthPicker(!showYearMonthPicker)}>
-                                    {calendarPicker.month.getFullYear()}年{calendarPicker.month.getMonth() + 1}月
-                                </span>
-                                <button className="nav-btn" onClick={() => setCalendarPicker(prev => prev ? { ...prev, month: new Date(prev.month.getFullYear(), prev.month.getMonth() + 1, 1) } : null)}>
-                                    <ChevronRight size={18} />
-                                </button>
-                            </div>
-                            {showYearMonthPicker ? (
-                                <div className="year-month-picker">
-                                    <div className="year-selector">
-                                        <button className="nav-btn" onClick={() => setCalendarPicker(prev => prev ? { ...prev, month: new Date(prev.month.getFullYear() - 1, prev.month.getMonth(), 1) } : null)}>
-                                            <ChevronLeft size={16} />
-                                        </button>
-                                        <span className="year-label">{calendarPicker.month.getFullYear()}年</span>
-                                        <button className="nav-btn" onClick={() => setCalendarPicker(prev => prev ? { ...prev, month: new Date(prev.month.getFullYear() + 1, prev.month.getMonth(), 1) } : null)}>
-                                            <ChevronRight size={16} />
-                                        </button>
-                                    </div>
-                                    <div className="month-grid">
-                                        {['一月','二月','三月','四月','五月','六月','七月','八月','九月','十月','十一月','十二月'].map((name, i) => (
-                                            <button
-                                                key={i}
-                                                className={`month-btn ${i === calendarPicker.month.getMonth() ? 'active' : ''}`}
-                                                onClick={() => {
-                                                    setCalendarPicker(prev => prev ? { ...prev, month: new Date(prev.month.getFullYear(), i, 1) } : null)
-                                                    setShowYearMonthPicker(false)
-                                                }}
-                                            >{name}</button>
-                                        ))}
-                                    </div>
-                                </div>
-                            ) : (
-                              <>
-                            <div className="calendar-weekdays">
-                                {['日', '一', '二', '三', '四', '五', '六'].map(d => <div key={d} className="weekday">{d}</div>)}
-                            </div>
-                            <div className="calendar-days">
-                                {(() => {
-                                    const y = calendarPicker.month.getFullYear()
-                                    const m = calendarPicker.month.getMonth()
-                                    const firstDay = new Date(y, m, 1).getDay()
-                                    const daysInMonth = new Date(y, m + 1, 0).getDate()
-                                    const cells: (number | null)[] = []
-                                    for (let i = 0; i < firstDay; i++) cells.push(null)
-                                    for (let i = 1; i <= daysInMonth; i++) cells.push(i)
-                                    const today = new Date()
-                                    return cells.map((day, i) => {
-                                        if (day === null) return <div key={i} className="day-cell empty" />
-                                        const dateStr = `${y}-${String(m + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
-                                        const isToday = day === today.getDate() && m === today.getMonth() && y === today.getFullYear()
-                                        const currentVal = calendarPicker.field === 'start' ? exportDateRange.start : exportDateRange.end
-                                        const isSelected = dateStr === currentVal
-                                        return (
-                                            <div
-                                                key={i}
-                                                className={`day-cell${isSelected ? ' selected' : ''}${isToday ? ' today' : ''}`}
-                                                onClick={() => {
-                                                    setExportDateRange(prev => ({ ...prev, [calendarPicker.field]: dateStr }))
-                                                    setCalendarPicker(null)
-                                                }}
-                                            >{day}</div>
-                                        )
-                                    })
-                                })()}
-                            </div>
-                              </>
-                            )}
-                        </div>
-                        <div className="quick-options">
-                            <button onClick={() => {
-                                if (calendarPicker.field === 'start') {
-                                    const d = new Date(); d.setMonth(d.getMonth() - 1)
-                                    setExportDateRange(prev => ({ ...prev, start: d.toISOString().split('T')[0] }))
-                                } else {
-                                    setExportDateRange(prev => ({ ...prev, end: new Date().toISOString().split('T')[0] }))
-                                }
-                                setCalendarPicker(null)
-                            }}>{calendarPicker.field === 'start' ? '一个月前' : '今天'}</button>
-                            <button onClick={() => {
-                                if (calendarPicker.field === 'start') {
-                                    const d = new Date(); d.setMonth(d.getMonth() - 3)
-                                    setExportDateRange(prev => ({ ...prev, start: d.toISOString().split('T')[0] }))
-                                } else {
-                                    const d = new Date(); d.setMonth(d.getMonth() - 1)
-                                    setExportDateRange(prev => ({ ...prev, end: d.toISOString().split('T')[0] }))
-                                }
-                                setCalendarPicker(null)
-                            }}>{calendarPicker.field === 'start' ? '三个月前' : '一个月前'}</button>
-                        </div>
-                        <div className="dialog-footer">
-                            <button className="cancel-btn" onClick={() => { setCalendarPicker(null); setShowYearMonthPicker(false) }}>取消</button>
-                        </div>
-                    </div>
-                </div>
-            )}
+            <ExportDateRangeDialog
+                open={isExportDateRangeDialogOpen}
+                value={exportDateRangeSelection}
+                onClose={() => setIsExportDateRangeDialogOpen(false)}
+                onConfirm={(nextSelection) => {
+                    setExportDateRangeSelection(nextSelection)
+                    setIsExportDateRangeDialogOpen(false)
+                }}
+            />
         </div>
     )
 }
