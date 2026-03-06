@@ -52,6 +52,62 @@
     color: var(--text-primary);
     background: color-mix(in srgb, var(--primary) 8%, var(--bg-secondary));
   }
+
+  &.active {
+    border-color: color-mix(in srgb, var(--primary) 42%, var(--border-color));
+    background: color-mix(in srgb, var(--primary) 8%, var(--bg-secondary));
+    color: var(--text-primary);
+  }
+}
+
+.session-load-detail-entry-icon {
+  width: 16px;
+  height: 14px;
+  display: inline-flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.session-load-detail-entry-bar {
+  width: 3px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--primary) 78%, var(--text-tertiary));
+  opacity: 0.82;
+  animation: sessionLoadDetailBars 1.8s ease-in-out infinite;
+
+  &:nth-child(1) {
+    height: 7px;
+    animation-delay: 0s;
+  }
+
+  &:nth-child(2) {
+    height: 11px;
+    animation-delay: 0.18s;
+  }
+
+  &:nth-child(3) {
+    height: 9px;
+    animation-delay: 0.36s;
+  }
+}
+
+.session-load-detail-entry.active .session-load-detail-entry-bar {
+  animation-duration: 1.1s;
+  opacity: 1;
+}
+
+@keyframes sessionLoadDetailBars {
+  0%, 100% {
+    transform: scaleY(0.72);
+    opacity: 0.5;
+  }
+
+  50% {
+    transform: scaleY(1.18);
+    opacity: 1;
+  }
 }
 
 .export-section-title {

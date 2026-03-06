@@ -5580,6 +5580,14 @@ function ExportPage() {
     }
     return latest
   }, [sessionLoadDetailRows])
+  const isSessionLoadDetailActive = useMemo(() => (
+    sessionLoadDetailRows.some(row => (
+      row.messageCount.statusLabel.startsWith('加载中') ||
+      row.mediaMetrics.statusLabel.startsWith('加载中') ||
+      row.snsPostCounts.statusLabel.startsWith('加载中') ||
+      row.mutualFriends.statusLabel.startsWith('加载中')
+    ))
+  ), [sessionLoadDetailRows])
   const closeTaskCenter = useCallback(() => {
     setIsTaskCenterOpen(false)
     setExpandedPerfTaskId(null)
@@ -6093,11 +6101,15 @@ function ExportPage() {
           ]}
         />
         <button
-          className="session-load-detail-entry"
+          className={`session-load-detail-entry ${isSessionLoadDetailActive ? 'active' : ''}`}
           type="button"
           onClick={() => setShowSessionLoadDetailModal(true)}
         >
-          <ClipboardList size={14} />
+          <span className="session-load-detail-entry-icon" aria-hidden="true">
+            <span className="session-load-detail-entry-bar" />
+            <span className="session-load-detail-entry-bar" />
+            <span className="session-load-detail-entry-bar" />
+          </span>
           <span>数据加载详情</span>
         </button>
       </div>
