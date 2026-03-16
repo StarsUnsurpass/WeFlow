@@ -11,9 +11,19 @@ import {
 import ConfirmDialog from '../components/ConfirmDialog'
 import './WelcomePage.scss'
 
+const isMac = navigator.userAgent.toLowerCase().includes('mac')
+const isLinux = navigator.userAgent.toLowerCase().includes('linux')
+
+const dbDirName = isMac ? '2.0b4.0.9 目录' : 'xwechat_files 目录'
+const dbPathPlaceholder = isMac
+    ? '例如: ~/Library/Containers/com.tencent.xinWeChat/Data/Library/Application Support/com.tencent.xinWeChat/2.0b4.0.9'
+    : isLinux
+        ? '例如: ~/.local/share/WeChat/xwechat_files 或者 ~/Documents/xwechat_files'
+        : '例如: C:\\Users\\xxx\\Documents\\xwechat_files'
+
 const steps = [
   { id: 'intro', title: '欢迎', desc: '准备开始你的本地数据探索' },
-  { id: 'db', title: '数据库目录', desc: '定位 xwechat_files 目录' },
+  { id: 'db', title: '数据库目录', desc: `定位 ${dbDirName}` },
   { id: 'cache', title: '缓存目录', desc: '设置本地缓存存储位置（可选）' },
   { id: 'key', title: '解密密钥', desc: '获取密钥与自动识别账号' },
   { id: 'image', title: '图片密钥', desc: '获取 XOR 与 AES 密钥' },
