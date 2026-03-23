@@ -64,6 +64,7 @@ export const CONFIG_KEYS = {
   NOTIFICATION_POSITION: 'notificationPosition',
   NOTIFICATION_FILTER_MODE: 'notificationFilterMode',
   NOTIFICATION_FILTER_LIST: 'notificationFilterList',
+  HTTP_API_TOKEN: 'httpApiToken',
   MESSAGE_PUSH_ENABLED: 'messagePushEnabled',
   WINDOW_CLOSE_BEHAVIOR: 'windowCloseBehavior',
   QUOTE_LAYOUT: 'quoteLayout',
@@ -115,6 +116,17 @@ export async function setDecryptKey(key: string): Promise<void> {
 export async function getDbPath(): Promise<string | null> {
   const value = await config.get(CONFIG_KEYS.DB_PATH)
   return value as string | null
+}
+
+// 获取api access_token
+export async function getHttpApiToken(): Promise<string> {
+  const value = await config.get(CONFIG_KEYS.HTTP_API_TOKEN)
+  return (value as string) || ''
+}
+
+// 设置access_token
+export async function setHttpApiToken(token: string): Promise<void> {
+  await config.set(CONFIG_KEYS.HTTP_API_TOKEN, token)
 }
 
 // 设置数据库路径

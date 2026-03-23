@@ -246,49 +246,102 @@ class HttpService {
     }
   }
 
-  /**
-   * 处理 HTTP 请求
-   */
-  private async handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-    // 设置 CORS 头
-    res.setHeader('Access-Control-Allow-Origin', '*')
-    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS')
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
-
-    if (req.method === 'OPTIONS') {
-      res.writeHead(204)
-      res.end()
-      return
+    /**
+     * 解析 POST 请求的 JSON Body
+     */
+    private async parseBody(req: http.IncomingMessage): Promise<Record<string, any>> {
+        if (req.method !== 'POST') return {}
+        return new Promise((resolve) => {
+            let body = ''
+            req.on('data', chunk => { body += chunk.toString() })
+            req.on('end', () => {
+                try {
+                    resolve(JSON.parse(body))
+                } catch {
+                    resolve({})
+                }
+            })
+            req.on('error', () => resolve({}))
+        })
     }
 
-    const url = new URL(req.url || '/', `http://127.0.0.1:${this.port}`)
-    const pathname = url.pathname
+    /**
+     * 鉴权拦截器
+     */
+    private verifyToken(req: http.IncomingMessage, url: URL, body: Record<string, any>): boolean {
+        const expectedToken = String(this.configService.get('httpApiToken') || '').trim()
+        if (!expectedToken) return true
 
-    try {
-      // 路由处理
-      if (pathname === '/health' || pathname === '/api/v1/health') {
-        this.sendJson(res, { status: 'ok' })
-      } else if (pathname === '/api/v1/push/messages') {
-        this.handleMessagePushStream(req, res)
-      } else if (pathname === '/api/v1/messages') {
-        await this.handleMessages(url, res)
-      } else if (pathname === '/api/v1/sessions') {
-        await this.handleSessions(url, res)
-      } else if (pathname === '/api/v1/contacts') {
-        await this.handleContacts(url, res)
-      } else if (pathname === '/api/v1/group-members') {
-        await this.handleGroupMembers(url, res)
-      } else if (pathname.startsWith('/api/v1/media/')) {
-        this.handleMediaRequest(pathname, res)
-      } else {
-        this.sendError(res, 404, 'Not Found')
-      }
-    } catch (error) {
-      console.error('[HttpService] Request error:', error)
-      this.sendError(res, 500, String(error))
+        const authHeader = req.headers.authorization
+        if (authHeader && authHeader.toLowerCase().startsWith('bearer ')) {
+            const token = authHeader.substring(7).trim()
+            if (token === expectedToken) return true
+        }
+
+        const queryToken = url.searchParams.get('access_token')
+        if (queryToken && queryToken.trim() === expectedToken) return true
+
+        const bodyToken = body['access_token']
+        if (bodyToken && String(bodyToken).trim() === expectedToken) return true
+
+        return false
     }
-  }
 
+    /**
+     * 处理 HTTP 请求 (重构后)
+     */
+    private async handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+        res.setHeader('Access-Control-Allow-Origin', '*')
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+
+        if (req.method === 'OPTIONS') {
+            res.writeHead(204)
+            res.end()
+            return
+        }
+
+        const url = new URL(req.url || '/', `http://127.0.0.1:${this.port}`)
+        const pathname = url.pathname
+
+        try {
+            const bodyParams = await this.parseBody(req)
+
+            for (const [key, value] of Object.entries(bodyParams)) {
+                if (!url.searchParams.has(key)) {
+                    url.searchParams.set(key, String(value))
+                }
+            }
+
+            if (pathname !== '/health' && pathname !== '/api/v1/health') {
+                if (!this.verifyToken(req, url, bodyParams)) {
+                    this.sendError(res, 401, 'Unauthorized: Invalid or missing access_token')
+                    return
+                }
+            }
+
+            if (pathname === '/health' || pathname === '/api/v1/health') {
+                this.sendJson(res, { status: 'ok' })
+            } else if (pathname === '/api/v1/push/messages') {
+                this.handleMessagePushStream(req, res)
+            } else if (pathname === '/api/v1/messages') {
+                await this.handleMessages(url, res)
+            } else if (pathname === '/api/v1/sessions') {
+                await this.handleSessions(url, res)
+            } else if (pathname === '/api/v1/contacts') {
+                await this.handleContacts(url, res)
+            } else if (pathname === '/api/v1/group-members') {
+                await this.handleGroupMembers(url, res)
+            } else if (pathname.startsWith('/api/v1/media/')) {
+                this.handleMediaRequest(pathname, res)
+            } else {
+                this.sendError(res, 404, 'Not Found')
+            }
+        } catch (error) {
+            console.error('[HttpService] Request error:', error)
+            this.sendError(res, 500, String(error))
+        }
+    }
   private startMessagePushHeartbeat(): void {
     if (this.messagePushHeartbeatTimer) return
     this.messagePushHeartbeatTimer = setInterval(() => {
