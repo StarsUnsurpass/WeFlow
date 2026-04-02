@@ -4,6 +4,8 @@ on:
   schedule:
     - cron: '0 2 * * *'  # 每天 UTC 02:00（北京时间 10:00）
   workflow_dispatch:     # 支持手动触发
+  pull_request:          # 监控 PR
+    branches: [ main, dev ]
 
 permissions:
   contents: read
