@@ -30,7 +30,7 @@ import { cloudControlService } from './services/cloudControlService'
 import { destroyNotificationWindow, registerNotificationHandlers, showNotification } from './windows/notificationWindow'
 import { httpService } from './services/httpService'
 import { messagePushService } from './services/messagePushService'
-
+import { bizService } from './services/bizService'
 
 // 配置自动更新
 autoUpdater.autoDownload = false
@@ -38,18 +38,28 @@ autoUpdater.autoInstallOnAppQuit = true
 autoUpdater.disableDifferentialDownload = true  // 禁用差分更新，强制全量下载
 // 更新通道策略：
 // - 稳定版（如 4.3.0）默认走 latest
-// - 预览版（如 4.3.0-preview.26.1）默认走 preview
-// - 开发版（如 4.3.0-dev.26.3.4）默认走 dev
+// - 预览版（如 0.26.2）默认走 preview（0.年.当年发布序号）
+// - 开发版（如 26.4.5）默认走 dev（年.月.日）
 // - 用户可在设置页切换稳定/预览/开发，切换后即时生效
 // 同时区分 Windows x64 / arm64，避免更新清单互相覆盖。
 const appVersion = app.getVersion()
+const inferUpdateTrackFromVersion = (version: string): 'stable' | 'preview' | 'dev' => {
+  const normalized = String(version || '').trim().replace(/^v/i, '')
+  if (/^0\.\d{2}\.\d+$/i.test(normalized)) return 'preview'
+  if (/^\d{2}\.\d{1,2}\.\d{1,2}$/i.test(normalized)) return 'dev'
+  // 兼容旧版命名（如 4.3.0-preview.26.1 / 4.3.0-dev.26.3.4）
+  if (/-preview\.\d+\.\d+$/i.test(normalized)) return 'preview'
+  if (/-dev\.\d+\.\d+\.\d+$/i.test(normalized)) return 'dev'
+  // 兼容 alpha/beta/rc 预发布
+  if (/(alpha|beta|rc)/i.test(normalized)) return 'dev'
+  return 'stable'
+}
+
 const defaultUpdateTrack: 'stable' | 'preview' | 'dev' = (() => {
-  if (/-preview\.\d+\.\d+$/i.test(appVersion)) return 'preview'
-  if (/-dev\.\d+\.\d+\.\d+$/i.test(appVersion)) return 'dev'
-  if (/(alpha|beta|rc)/i.test(appVersion)) return 'dev'
+  const inferred = inferUpdateTrackFromVersion(appVersion)
+  if (inferred === 'preview' || inferred === 'dev') return inferred
   return 'stable'
 })()
-const isPrereleaseBuild = defaultUpdateTrack !== 'stable'
 let configService: ConfigService | null = null
 
 const normalizeUpdateTrack = (raw: unknown): 'stable' | 'preview' | 'dev' | null => {
@@ -62,16 +72,81 @@ const getEffectiveUpdateTrack = (): 'stable' | 'preview' | 'dev' => {
   return configuredTrack || defaultUpdateTrack
 }
 
+const isRemoteVersionNewer = (latestVersion: string, currentVersion: string): boolean => {
+  const latest = String(latestVersion || '').trim()
+  const current = String(currentVersion || '').trim()
+  if (!latest || !current) return false
+
+  const parseVersion = (version: string) => {
+    const normalized = version.replace(/^v/i, '')
+    const [main, pre = ''] = normalized.split('-', 2)
+    const core = main.split('.').map((segment) => Number.parseInt(segment, 10) || 0)
+    const prerelease = pre ? pre.split('.').map((segment) => /^\d+$/.test(segment) ? Number.parseInt(segment, 10) : segment) : []
+    return { core, prerelease }
+  }
+
+  const compareParsedVersion = (a: ReturnType<typeof parseVersion>, b: ReturnType<typeof parseVersion>): number => {
+    const maxLen = Math.max(a.core.length, b.core.length)
+    for (let i = 0; i < maxLen; i += 1) {
+      const left = a.core[i] || 0
+      const right = b.core[i] || 0
+      if (left > right) return 1
+      if (left < right) return -1
+    }
+
+    const aPre = a.prerelease
+    const bPre = b.prerelease
+    if (aPre.length === 0 && bPre.length === 0) return 0
+    if (aPre.length === 0) return 1
+    if (bPre.length === 0) return -1
+
+    const preMaxLen = Math.max(aPre.length, bPre.length)
+    for (let i = 0; i < preMaxLen; i += 1) {
+      const left = aPre[i]
+      const right = bPre[i]
+      if (left === undefined) return -1
+      if (right === undefined) return 1
+      if (left === right) continue
+
+      const leftNum = typeof left === 'number'
+      const rightNum = typeof right === 'number'
+      if (leftNum && rightNum) return left > right ? 1 : -1
+      if (leftNum) return -1
+      if (rightNum) return 1
+      return String(left) > String(right) ? 1 : -1
+    }
+
+    return 0
+  }
+
+  try {
+    return autoUpdater.currentVersion.compare(latest) < 0
+  } catch {
+    return compareParsedVersion(parseVersion(latest), parseVersion(current)) > 0
+  }
+}
+
+const shouldOfferUpdateForTrack = (latestVersion: string, currentVersion: string): boolean => {
+  if (isRemoteVersionNewer(latestVersion, currentVersion)) return true
+  const effectiveTrack = getEffectiveUpdateTrack()
+  const currentTrack = inferUpdateTrackFromVersion(currentVersion)
+  // 切换通道后，目标通道最新版本与当前版本不同即提示更新（即使是降级）
+  if (effectiveTrack !== currentTrack && latestVersion !== currentVersion) return true
+  return false
+}
+
 const applyAutoUpdateChannel = (reason: 'startup' | 'settings' = 'startup') => {
   const track = getEffectiveUpdateTrack()
+  const currentTrack = inferUpdateTrackFromVersion(appVersion)
   const baseUpdateChannel = track === 'stable' ? 'latest' : track
   autoUpdater.allowPrerelease = track !== 'stable'
-  autoUpdater.allowDowngrade = isPrereleaseBuild && track === 'stable'
+  // 只要用户当前选择的目标通道与当前安装版本所属通道不同，就允许跨通道更新（含降级）
+  autoUpdater.allowDowngrade = track !== currentTrack
   autoUpdater.channel =
     process.platform === 'win32' && process.arch === 'arm64'
       ? `${baseUpdateChannel}-arm64`
       : baseUpdateChannel
-  console.log(`[Update](${reason}) 当前版本 ${appVersion}，渠道偏好: ${track}，更新通道: ${autoUpdater.channel}`)
+  console.log(`[Update](${reason}) 当前版本 ${appVersion}，当前轨道: ${currentTrack}，渠道偏好: ${track}，更新通道: ${autoUpdater.channel}，allowDowngrade=${autoUpdater.allowDowngrade}`)
 }
 
 applyAutoUpdateChannel('startup')
@@ -1152,6 +1227,7 @@ const removeMatchedEntriesInDir = async (
 // 注册 IPC 处理器
 function registerIpcHandlers() {
   registerNotificationHandlers()
+  bizService.registerHandlers()
   // 配置相关
   ipcMain.handle('config:get', async (_, key: string) => {
     return configService?.get(key as any)
@@ -1283,7 +1359,7 @@ function registerIpcHandlers() {
       if (result && result.updateInfo) {
         const currentVersion = app.getVersion()
         const latestVersion = result.updateInfo.version
-        if (latestVersion !== currentVersion) {
+        if (shouldOfferUpdateForTrack(latestVersion, currentVersion)) {
           return {
             hasUpdate: true,
             version: latestVersion,
@@ -2741,7 +2817,7 @@ function checkForUpdatesOnStartup() {
         const latestVersion = result.updateInfo.version
 
         // 检查是否有新版本
-        if (latestVersion !== currentVersion && mainWindow) {
+        if (shouldOfferUpdateForTrack(latestVersion, currentVersion) && mainWindow) {
           // 检查该版本是否被用户忽略
           const ignoredVersion = configService?.get('ignoredUpdateVersion')
           if (ignoredVersion === latestVersion) {
