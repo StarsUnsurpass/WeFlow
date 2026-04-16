@@ -372,6 +372,7 @@ if (process.platform === 'darwin') {
 let mainWindowReady = false
 let shouldShowMain = true
 let isAppQuitting = false
+let shutdownPromise: Promise<void> | null = null
 let tray: Tray | null = null
 let isClosePromptVisible = false
 const chatHistoryPayloadStore = new Map<string, { sessionId: string; title?: string; recordList: any[] }>()
@@ -3869,23 +3870,35 @@ app.whenReady().then(async () => {
   })
 })
 
-app.on('before-quit', async () => {
-  isAppQuitting = true
-  // 销毁 tray 图标
-  if (tray) { try { tray.destroy() } catch {} tray = null }
-  // 通知窗使用 hide 而非 close，退出时主动销毁，避免残留窗口阻塞进程退出。
-  destroyNotificationWindow()
-  insightService.stop()
-  // 兜底：5秒后强制退出，防止某个异步任务卡住导致进程残留
-  const forceExitTimer = setTimeout(() => {
-    console.warn('[App] Force exit after timeout')
-    app.exit(0)
-  }, 5000)
-  forceExitTimer.unref()
-  // 停止 HTTP 服务器，释放 TCP 端口占用，避免进程无法退出
-  try { await httpService.stop() } catch {}
-  // 终止 wcdb Worker 线程，避免线程阻止进程退出
-  try { await wcdbService.shutdown() } catch {}
+const shutdownAppServices = async (): Promise<void> => {
+  if (shutdownPromise) return shutdownPromise
+  shutdownPromise = (async () => {
+    isAppQuitting = true
+    // 销毁 tray 图标
+    if (tray) { try { tray.destroy() } catch {} tray = null }
+    // 通知窗使用 hide 而非 close，退出时主动销毁，避免残留窗口阻塞进程退出。
+    destroyNotificationWindow()
+    messagePushService.stop()
+    insightService.stop()
+    // 兜底：5秒后强制退出，防止某个异步任务卡住导致进程残留
+    const forceExitTimer = setTimeout(() => {
+      console.warn('[App] Force exit after timeout')
+      app.exit(0)
+    }, 5000)
+    forceExitTimer.unref()
+    try { await cloudControlService.stop() } catch {}
+    // 停止 chatService（内部会关闭 cursor 与 DB），避免退出阶段仍触发监控回调
+    try { chatService.close() } catch {}
+    // 停止 HTTP 服务器，释放 TCP 端口占用，避免进程无法退出
+    try { await httpService.stop() } catch {}
+    // 终止 wcdb Worker 线程，避免线程阻止进程退出
+    try { await wcdbService.shutdown() } catch {}
+  })()
+  return shutdownPromise
+}
+
+app.on('before-quit', () => {
+  void shutdownAppServices()
 })
 
 app.on('window-all-closed', () => {

@@ -2,6 +2,7 @@
 import { app, safeStorage } from 'electron'
 import crypto from 'crypto'
 import Store from 'electron-store'
+import { expandHomePath } from '../utils/pathUtils'
 
 // 加密前缀标记
 const SAFE_PREFIX = 'safe:'  // safeStorage 加密（普通模式）
@@ -295,12 +296,20 @@ export class ConfigService {
       return this.decryptWxidConfigs(raw as any) as ConfigSchema[K]
     }
 
+    if (key === 'dbPath' && typeof raw === 'string') {
+      return expandHomePath(raw) as ConfigSchema[K]
+    }
+
     return raw
   }
 
   set<K extends keyof ConfigSchema>(key: K, value: ConfigSchema[K]): void {
     let toStore = value
     const inLockMode = this.isLockMode() && this.unlockPassword
+
+    if (key === 'dbPath' && typeof value === 'string') {
+      toStore = expandHomePath(value) as ConfigSchema[K]
+    }
 
     if (ENCRYPTED_BOOL_KEYS.has(key)) {
       const boolValue = value === true || value === 'true'
